@@ -10,6 +10,7 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use std::error::Error;
 
+use crate::sanitize;
 use crate::stock::{DailyClose, Stock};
 use model::ChartResponse;
 
@@ -37,7 +38,8 @@ pub fn fetch(client: &Client, symbol: &str, range: &str) -> Result<Stock, Box<dy
     // その手前でステータスを見て分かりやすい案内に差し替える。
     if response.status() == StatusCode::NOT_FOUND {
         return Err(format!(
-            "銘柄コード {symbol} が見つかりませんでした（例: 7203.T, 6758.T, AAPL）"
+            "銘柄コード {} が見つかりませんでした（例: 7203.T, 6758.T, AAPL）",
+            sanitize::for_display(symbol)
         )
         .into());
     }
@@ -45,12 +47,12 @@ pub fn fetch(client: &Client, symbol: &str, range: &str) -> Result<Stock, Box<dy
     let body: ChartResponse = response.error_for_status()?.json()?;
 
     // result は配列。銘柄が見つからない場合は空になるので、その時はエラーにする
-    let result = body
-        .chart
-        .result
-        .into_iter()
-        .next()
-        .ok_or_else(|| format!("銘柄 {symbol} のデータが取得できませんでした"))?;
+    let result = body.chart.result.into_iter().next().ok_or_else(|| {
+        format!(
+            "銘柄 {} のデータが取得できませんでした",
+            sanitize::for_display(symbol)
+        )
+    })?;
 
     let meta = result.meta;
     let quote = result
@@ -116,7 +118,9 @@ fn validate_symbol(symbol: &str) -> Result<(), Box<dyn Error>> {
 
     if let Some(c) = symbol.chars().find(|c| !is_allowed(*c)) {
         return Err(format!(
-            "銘柄コード {symbol} に使用できない文字 '{c}' が含まれています（英数字と . ^ - = のみ）"
+            "銘柄コード {} に使用できない文字 '{}' が含まれています（英数字と . ^ - = のみ）",
+            sanitize::for_display(symbol),
+            sanitize::char_for_display(c)
         )
         .into());
     }
@@ -124,7 +128,11 @@ fn validate_symbol(symbol: &str) -> Result<(), Box<dyn Error>> {
     // 記号だけの値（.. や --- など）は銘柄コードたりえない。
     // ここに到達した時点で文字種は検証済みなので、そのまま表示してよい。
     if !symbol.chars().any(|c| c.is_ascii_alphanumeric()) {
-        return Err(format!("銘柄コード {symbol} が英数字を含んでいません").into());
+        return Err(format!(
+            "銘柄コード {} が英数字を含んでいません",
+            sanitize::for_display(symbol)
+        )
+        .into());
     }
 
     Ok(())
