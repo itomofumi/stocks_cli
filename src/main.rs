@@ -1,14 +1,28 @@
 use chrono::{DateTime, FixedOffset, TimeZone};
+use clap::Parser;
 use serde::Deserialize;
 use std::error::Error;
 // textplots の Chart は JSON 側の Chart と名前がぶつかるので別名を付ける
 use textplots::{Chart as TextChart, Plot, Shape};
 
-/// トヨタ自動車の東証銘柄コード（.T は東京証券取引所を表す）
-const SYMBOL: &str = "7203.T";
+/// コマンドライン引数の定義。
+/// derive(Parser) を付けると、この struct から clap が自動でパーサを生成する。
+/// ドキュメンテーションコメント（///）がそのまま --help の説明文になる。
+#[derive(Parser)]
+#[command(version, about = "指定した銘柄の株価を取得して表示する")]
+struct Args {
+    /// 銘柄コード（例: 7203.T=トヨタ, 6758.T=ソニー, AAPL=アップル）
+    #[arg(default_value = "7203.T")]
+    symbol: String,
 
-/// 取得する期間。5d = 直近5営業日（＝1週間分）
-const RANGE: &str = "5d";
+    /// 取得期間（例: 5d, 1mo, 6mo, 1y）
+    #[arg(short, long, default_value = "5d")]
+    range: String,
+
+    /// グラフを表示しない
+    #[arg(long)]
+    no_chart: bool,
+}
 
 // --- ここから JSON の受け皿となる構造体 ---
 // Yahoo Finance のレスポンスは
@@ -71,8 +85,12 @@ fn to_jst(unixtime: i64) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // 引数のパース。--help や --version、不正な入力への対応も clap が行う
+    let args = Args::parse();
+
     let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?range={RANGE}&interval=1d"
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval=1d",
+        args.symbol, args.range
     );
 
     // Yahoo は User-Agent がないとリクエストを弾くことがあるので付けておく
@@ -88,7 +106,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .chart
         .result
         .first()
-        .ok_or("銘柄データが取得できませんでした")?;
+        .ok_or_else(|| format!("銘柄 {} のデータが取得できませんでした", args.symbol))?;
     let meta = &result.meta;
 
     // --- 1週間分の終値を取り出す ---
@@ -143,7 +161,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    println!("\n直近{}営業日の終値:", history.len());
+    println!("\n直近{}営業日の終値 (range={}):", history.len(), args.range);
     for (date, price) in &history {
         println!("  {}  {:>8.1}", date.format("%m/%d (%a)"), price);
     }
@@ -155,10 +173,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|(i, (_, price))| (i as f32, *price as f32))
         .collect();
 
-    println!("\n終値の推移 (縦軸: {}, 横軸: 経過日数)", meta.currency);
-    TextChart::new(120, 60, 0.0, (points.len() - 1) as f32)
-        .lineplot(&Shape::Lines(&points))
-        .display();
+    if !args.no_chart {
+        println!("\n終値の推移 (縦軸: {}, 横軸: 経過日数)", meta.currency);
+        TextChart::new(120, 60, 0.0, (points.len() - 1) as f32)
+            .lineplot(&Shape::Lines(&points))
+            .display();
+    }
 
     Ok(())
 }
