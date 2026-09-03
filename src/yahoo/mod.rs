@@ -15,6 +15,12 @@ use model::ChartResponse;
 
 const ENDPOINT: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 
+/// 銘柄コードの長さの上限。
+///
+/// 実在する銘柄コードは長くても10文字程度（^GSPTSE=7文字, BRK-B=5文字）なので、
+/// 余裕を見て20文字とする。
+const MAX_SYMBOL_LEN: usize = 20;
+
 /// 指定した銘柄・期間の株価を取得する
 pub fn fetch(client: &Client, symbol: &str, range: &str) -> Result<Stock, Box<dyn Error>> {
     validate_symbol(symbol)?;
@@ -97,6 +103,15 @@ fn validate_symbol(symbol: &str) -> Result<(), Box<dyn Error>> {
         return Err("銘柄コードが空です".into());
     }
 
+    // 長さの確認は文字種より先に行う。長すぎる入力を弾く際に、
+    // その中身をエラーメッセージへ載せないため。
+    let len = symbol.chars().count();
+    if len > MAX_SYMBOL_LEN {
+        return Err(
+            format!("銘柄コードが長すぎます（最大{MAX_SYMBOL_LEN}文字、指定は{len}文字）").into(),
+        );
+    }
+
     let is_allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '^' | '-' | '=');
 
     if let Some(c) = symbol.chars().find(|c| !is_allowed(*c)) {
@@ -104,6 +119,12 @@ fn validate_symbol(symbol: &str) -> Result<(), Box<dyn Error>> {
             "銘柄コード {symbol} に使用できない文字 '{c}' が含まれています（英数字と . ^ - = のみ）"
         )
         .into());
+    }
+
+    // 記号だけの値（.. や --- など）は銘柄コードたりえない。
+    // ここに到達した時点で文字種は検証済みなので、そのまま表示してよい。
+    if !symbol.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err(format!("銘柄コード {symbol} が英数字を含んでいません").into());
     }
 
     Ok(())
@@ -143,5 +164,37 @@ mod tests {
     #[test]
     fn 空文字を弾く() {
         assert!(validate_symbol("").is_err());
+    }
+
+    #[test]
+    fn 上限を超える長さを弾く() {
+        let too_long = "A".repeat(super::MAX_SYMBOL_LEN + 1);
+        assert!(validate_symbol(&too_long).is_err());
+    }
+
+    #[test]
+    fn 上限ちょうどの長さは受け付ける() {
+        let just_fit = "A".repeat(super::MAX_SYMBOL_LEN);
+        assert!(validate_symbol(&just_fit).is_ok());
+    }
+
+    #[test]
+    fn 長すぎる入力の内容はメッセージに含めない() {
+        let too_long = "A".repeat(10_000);
+        let message = validate_symbol(&too_long).unwrap_err().to_string();
+        assert!(
+            !message.contains("AAAA"),
+            "入力がそのまま出力された: {message}"
+        );
+    }
+
+    #[test]
+    fn 記号だけの値を弾く() {
+        for symbol in ["..", "...", "---", "^", "="] {
+            assert!(
+                validate_symbol(symbol).is_err(),
+                "{symbol} が通ってしまった"
+            );
+        }
     }
 }

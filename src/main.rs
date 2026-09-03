@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 1銘柄が失敗しても残りの銘柄は続ける。
         // ? で main を抜けると後続が表示されないため、ここで受け止めて stderr に出す。
         if let Err(e) = report(&client, symbol, &args) {
-            eprintln!("エラー ({symbol}): {e}");
+            eprintln!("エラー ({}): {e}", truncate_for_display(symbol));
             has_error = true;
         }
     }
@@ -43,6 +43,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+/// エラー表示用に銘柄コードを切り詰める。
+///
+/// 検証エラーのメッセージ自体は入力の中身を含めていないが、
+/// ここで銘柄コードを添えているため、長い入力がそのまま端末へ流れてしまう。
+fn truncate_for_display(symbol: &str) -> String {
+    const MAX_DISPLAY_LEN: usize = 30;
+
+    if symbol.chars().count() <= MAX_DISPLAY_LEN {
+        return symbol.to_string();
+    }
+
+    let head: String = symbol.chars().take(MAX_DISPLAY_LEN).collect();
+    format!("{head}…(以下略)")
 }
 
 /// 1銘柄分を取得して表示する
@@ -63,4 +78,24 @@ fn report(client: &Client, symbol: &str, args: &Args) -> Result<(), Box<dyn Erro
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_for_display;
+
+    #[test]
+    fn 短い銘柄コードはそのまま表示する() {
+        assert_eq!(truncate_for_display("7203.T"), "7203.T");
+    }
+
+    #[test]
+    fn 長い入力は切り詰めて表示する() {
+        let actual = truncate_for_display(&"A".repeat(10_000));
+        assert!(
+            actual.chars().count() < 50,
+            "切り詰められていない: {actual}"
+        );
+        assert!(actual.ends_with("…(以下略)"));
+    }
 }
