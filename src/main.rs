@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             match result {
                 Ok(stock) => print_stock(&stock, &args),
                 Err(e) => {
-                    eprintln!("エラー ({symbol}): {e}");
+                    eprintln!("エラー ({}): {e}", truncate_for_display(symbol));
                     has_error = true;
                 }
             }
@@ -73,6 +73,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+/// エラー表示用に銘柄コードを切り詰める。
+///
+/// 検証エラーのメッセージ自体は入力の中身を含めていないが、
+/// ここで銘柄コードを添えているため、長い入力がそのまま端末へ流れてしまう。
+fn truncate_for_display(symbol: &str) -> String {
+    const MAX_DISPLAY_LEN: usize = 30;
+
+    if symbol.chars().count() <= MAX_DISPLAY_LEN {
+        return symbol.to_string();
+    }
+
+    let head: String = symbol.chars().take(MAX_DISPLAY_LEN).collect();
+    format!("{head}…(以下略)")
 }
 
 /// 複数銘柄を並列に取得する。
@@ -118,5 +133,25 @@ fn print_stock(stock: &Stock, args: &Args) {
 
     if !args.no_chart {
         output::print_chart(stock);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_for_display;
+
+    #[test]
+    fn 短い銘柄コードはそのまま表示する() {
+        assert_eq!(truncate_for_display("7203.T"), "7203.T");
+    }
+
+    #[test]
+    fn 長い入力は切り詰めて表示する() {
+        let actual = truncate_for_display(&"A".repeat(10_000));
+        assert!(
+            actual.chars().count() < 50,
+            "切り詰められていない: {actual}"
+        );
+        assert!(actual.ends_with("…(以下略)"));
     }
 }
