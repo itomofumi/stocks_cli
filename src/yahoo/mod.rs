@@ -17,9 +17,14 @@ const ENDPOINT: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 /// 指定した銘柄・期間の株価を取得する
 pub fn fetch(client: &Client, symbol: &str, range: &str) -> Result<Stock, Box<dyn Error>> {
-    let url = format!("{ENDPOINT}/{symbol}?range={range}&interval=1d");
+    validate_symbol(symbol)?;
 
-    let response = client.get(&url).send()?;
+    // クエリは query() に組み立てさせる。文字列連結だと、値に含まれる
+    // & や = がそのまま構造として解釈されてしまうため。
+    let response = client
+        .get(format!("{ENDPOINT}/{symbol}"))
+        .query(&[("range", range), ("interval", "1d")])
+        .send()?;
 
     // 存在しない銘柄コードには Yahoo が 404 を返す。
     // error_for_status() に任せると HTTP の生エラーがそのまま出てしまうため、
@@ -81,6 +86,29 @@ pub fn fetch(client: &Client, symbol: &str, range: &str) -> Result<Stock, Box<dy
     })
 }
 
+/// 銘柄コードとして許可する文字か検証する。
+///
+/// symbol は URL のパスに埋め込まれるため、? や & や / を通すと
+/// リクエスト先やクエリを差し替えられてしまう。
+/// 実在する銘柄コードは英数字と . ^ - = だけで表せる
+/// （7203.T / ^N225 / BRK-B / JPY=X など）ので、それ以外は弾く。
+fn validate_symbol(symbol: &str) -> Result<(), Box<dyn Error>> {
+    if symbol.is_empty() {
+        return Err("銘柄コードが空です".into());
+    }
+
+    let is_allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '^' | '-' | '=');
+
+    if let Some(c) = symbol.chars().find(|c| !is_allowed(*c)) {
+        return Err(format!(
+            "銘柄コード {symbol} に使用できない文字 '{c}' が含まれています（英数字と . ^ - = のみ）"
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 /// API が返す UNIX 秒を JST（UTC+9）の日時に変換する
 fn to_jst(unixtime: i64) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
     let jst = FixedOffset::east_opt(9 * 3600).ok_or("タイムゾーンの生成に失敗しました")?;
@@ -89,4 +117,31 @@ fn to_jst(unixtime: i64) -> Result<DateTime<FixedOffset>, Box<dyn Error>> {
         .single()
         .ok_or("時刻の変換に失敗しました")?;
     Ok(datetime)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_symbol;
+
+    #[test]
+    fn 実在する形式の銘柄コードを受け付ける() {
+        for symbol in ["7203.T", "AAPL", "^N225", "BRK-B", "JPY=X"] {
+            assert!(validate_symbol(symbol).is_ok(), "{symbol} が弾かれた");
+        }
+    }
+
+    #[test]
+    fn url_の構造を変えうる文字を弾く() {
+        for symbol in ["7203.T?range=1y", "7203.T&x=1", "../../etc", "7203.T#a"] {
+            assert!(
+                validate_symbol(symbol).is_err(),
+                "{symbol} が通ってしまった"
+            );
+        }
+    }
+
+    #[test]
+    fn 空文字を弾く() {
+        assert!(validate_symbol("").is_err());
+    }
 }
