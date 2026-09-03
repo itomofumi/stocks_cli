@@ -8,7 +8,6 @@ mod output;
 mod stock;
 mod yahoo;
 
-use clap::Parser;
 use reqwest::blocking::Client;
 use std::error::Error;
 
@@ -16,7 +15,7 @@ use cli::Args;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // 引数のパース。--help や --version、不正な入力への対応も clap が行う
-    let args = Args::parse();
+    let args = Args::parse_and_validate();
 
     // Yahoo は User-Agent がないとリクエストを弾くことがあるので付けておく。
     // Client は使い回すと接続を再利用できるので、ループの外で1つだけ作る。

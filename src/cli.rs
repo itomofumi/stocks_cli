@@ -3,7 +3,13 @@
 //! derive(Parser) を付けると、この struct から clap が自動でパーサを生成する。
 //! ドキュメンテーションコメント（///）がそのまま --help の説明文になる。
 
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
+
+/// 一度に指定できる銘柄数の上限。
+///
+/// 銘柄ごとに1回ずつ逐次リクエストするため、数が多いと
+/// Yahoo からレート制限を受ける恐れがある。
+pub const MAX_SYMBOLS: usize = 20;
 
 #[derive(Parser)]
 #[command(
@@ -16,6 +22,7 @@ use clap::{Parser, ValueEnum};
   米国株   ティッカーをそのまま   AAPL=アップル, MSFT, NVDA
   指数     ^ 始まり               ^N225=日経平均, ^GSPC=S&P500
   ※ 会社名（toyota / トヨタ）では指定できません
+  ※ 一度に指定できるのは20銘柄までです
 
 例:
   stocks_cli                      トヨタを直近5営業日分（既定）
@@ -39,6 +46,32 @@ pub struct Args {
     /// グラフを表示しない
     #[arg(long)]
     pub no_chart: bool,
+}
+
+impl Args {
+    /// 引数を読み込み、clap だけでは表現できない制約を検証する。
+    ///
+    /// 件数の上限は num_args でも書けるが、その場合のメッセージは
+    /// 「no more were expected」となり上限値が伝わらない。
+    /// Command::error() を使うと、clap 本来の書式のまま文面を指定できる。
+    pub fn parse_and_validate() -> Self {
+        let args = Self::parse();
+
+        if args.symbols.len() > MAX_SYMBOLS {
+            Self::command()
+                .error(
+                    clap::error::ErrorKind::TooManyValues,
+                    format!(
+                        "銘柄は一度に{}件までです（{}件指定されました）",
+                        MAX_SYMBOLS,
+                        args.symbols.len()
+                    ),
+                )
+                .exit(); // 終了コード 2 で終了する
+        }
+
+        args
+    }
 }
 
 /// 取得期間。Yahoo が受け付ける値だけを列挙する。
