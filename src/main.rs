@@ -1,5 +1,6 @@
 use chrono::{DateTime, FixedOffset, TimeZone};
 use clap::Parser;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::error::Error;
 // textplots の Chart は JSON 側の Chart と名前がぶつかるので別名を付ける
@@ -11,9 +12,9 @@ use textplots::{Chart as TextChart, Plot, Shape};
 #[derive(Parser)]
 #[command(version, about = "指定した銘柄の株価を取得して表示する")]
 struct Args {
-    /// 銘柄コード（例: 7203.T=トヨタ, 6758.T=ソニー, AAPL=アップル）
+    /// 銘柄コード。空白区切りで複数指定できる（例: 7203.T 6758.T AAPL）
     #[arg(default_value = "7203.T")]
-    symbol: String,
+    symbols: Vec<String>,
 
     /// 取得期間（例: 5d, 1mo, 6mo, 1y）
     #[arg(short, long, default_value = "5d")]
@@ -88,25 +89,66 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 引数のパース。--help や --version、不正な入力への対応も clap が行う
     let args = Args::parse();
 
-    let url = format!(
-        "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval=1d",
-        args.symbol, args.range
-    );
-
-    // Yahoo は User-Agent がないとリクエストを弾くことがあるので付けておく
+    // Yahoo は User-Agent がないとリクエストを弾くことがあるので付けておく。
+    // Client は使い回すと接続を再利用できるので、ループの外で1つだけ作る。
     let client = reqwest::blocking::Client::builder()
         .user_agent("stocks-cli/0.1")
         .build()?;
 
-    let response = client.get(&url).send()?.error_for_status()?;
-    let body: ChartResponse = response.json()?;
+    let mut has_error = false;
+
+    for (i, symbol) in args.symbols.iter().enumerate() {
+        // 2件目以降は区切り線を挟む
+        if i > 0 {
+            println!("\n{}\n", "─".repeat(48));
+        }
+
+        // 1銘柄が失敗しても残りの銘柄は続ける。
+        // ? で main を抜けると後続が表示されないため、ここで受け止めて stderr に出す。
+        if let Err(e) = report(&client, symbol, &args) {
+            eprintln!("エラー ({symbol}): {e}");
+            has_error = true;
+        }
+    }
+
+    // 1件でも失敗したらシェルに異常終了を伝える
+    if has_error {
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// 1銘柄分を取得して表示する
+fn report(
+    client: &reqwest::blocking::Client,
+    symbol: &str,
+    args: &Args,
+) -> Result<(), Box<dyn Error>> {
+    let url = format!(
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval=1d",
+        symbol, args.range
+    );
+
+    let response = client.get(&url).send()?;
+
+    // 存在しない銘柄コードには Yahoo が 404 を返す。
+    // error_for_status() に任せると HTTP の生エラーがそのまま出てしまうため、
+    // その手前でステータスを見て分かりやすい案内に差し替える。
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(
+            format!("銘柄コード {symbol} が見つかりませんでした（例: 7203.T, 6758.T, AAPL）").into(),
+        );
+    }
+
+    let body: ChartResponse = response.error_for_status()?.json()?;
 
     // result は配列。銘柄が見つからない場合は空になるので、その時はエラーにする
     let result = body
         .chart
         .result
         .first()
-        .ok_or_else(|| format!("銘柄 {} のデータが取得できませんでした", args.symbol))?;
+        .ok_or_else(|| format!("銘柄 {symbol} のデータが取得できませんでした"))?;
     let meta = &result.meta;
 
     // --- 1週間分の終値を取り出す ---
