@@ -4,6 +4,7 @@
 //! ドキュメンテーションコメント（///）がそのまま --help の説明文になる。
 
 use clap::{CommandFactory, Parser, ValueEnum};
+use std::collections::HashSet;
 
 /// 一度に指定できる銘柄数の上限。
 ///
@@ -55,8 +56,22 @@ impl Args {
     /// 「no more were expected」となり上限値が伝わらない。
     /// Command::error() を使うと、clap 本来の書式のまま文面を指定できる。
     pub fn parse_and_validate() -> Self {
-        let args = Self::parse();
+        let mut args = Self::parse();
 
+        args.symbols = normalize_symbols(args.symbols);
+
+        // 空文字だけを渡された場合、除去の結果1件も残らない
+        if args.symbols.is_empty() {
+            Self::command()
+                .error(
+                    clap::error::ErrorKind::InvalidValue,
+                    "銘柄コードが1件も指定されていません",
+                )
+                .exit();
+        }
+
+        // 件数の確認は除去後に行う。同じ銘柄を並べただけで
+        // 上限に達するのは不親切なため。
         if args.symbols.len() > MAX_SYMBOLS {
             Self::command()
                 .error(
@@ -72,6 +87,21 @@ impl Args {
 
         args
     }
+}
+
+/// 空文字を取り除き、重複を1つにまとめる。
+///
+/// 指定順は保ち、先に現れた方を残す。
+/// Yahoo は銘柄コードの大文字小文字を区別しない（aapl でも AAPL のデータが返る）ため、
+/// 比較は大文字に揃えて行う。
+fn normalize_symbols(symbols: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    symbols
+        .into_iter()
+        .filter(|symbol| !symbol.trim().is_empty())
+        // insert は「新しく追加できたか」を返す。既出なら false になり除外される
+        .filter(|symbol| seen.insert(symbol.to_uppercase()))
+        .collect()
 }
 
 /// 取得期間。Yahoo が受け付ける値だけを列挙する。
@@ -115,5 +145,38 @@ impl Range {
             Range::TwoYears => "2y",
             Range::FiveYears => "5y",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_symbols;
+
+    fn symbols(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn 重複を除去し指定順を保つ() {
+        let actual = normalize_symbols(symbols(&["6758.T", "7203.T", "6758.T"]));
+        assert_eq!(actual, symbols(&["6758.T", "7203.T"]));
+    }
+
+    #[test]
+    fn 大文字小文字を同一視し先に現れた表記を残す() {
+        let actual = normalize_symbols(symbols(&["AAPL", "aapl", "Aapl"]));
+        assert_eq!(actual, symbols(&["AAPL"]));
+    }
+
+    #[test]
+    fn 空文字と空白のみの要素を除去する() {
+        let actual = normalize_symbols(symbols(&["", "7203.T", "   "]));
+        assert_eq!(actual, symbols(&["7203.T"]));
+    }
+
+    #[test]
+    fn 除去対象がなければそのまま返す() {
+        let actual = normalize_symbols(symbols(&["7203.T", "6758.T"]));
+        assert_eq!(actual, symbols(&["7203.T", "6758.T"]));
     }
 }
