@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 /// 1銘柄分を取得して表示する
 fn report(client: &Client, symbol: &str, args: &Args) -> Result<(), Box<dyn Error>> {
-    let stock = yahoo::fetch(client, symbol, &args.range)?;
+    let stock = yahoo::fetch(client, symbol, args.range.as_str())?;
 
     output::print_summary(&stock);
 
@@ -57,7 +57,7 @@ fn report(client: &Client, symbol: &str, args: &Args) -> Result<(), Box<dyn Erro
         return Ok(());
     }
 
-    output::print_history(&stock, &args.range);
+    output::print_history(&stock, args.range.as_str());
 
     if !args.no_chart {
         output::print_chart(&stock);
