@@ -3,7 +3,7 @@
 //! derive(Parser) を付けると、この struct から clap が自動でパーサを生成する。
 //! ドキュメンテーションコメント（///）がそのまま --help の説明文になる。
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -16,9 +16,6 @@ use clap::Parser;
   米国株   ティッカーをそのまま   AAPL=アップル, MSFT, NVDA
   指数     ^ 始まり               ^N225=日経平均, ^GSPC=S&P500
   ※ 会社名（toyota / トヨタ）では指定できません
-
-期間 (-r, --range):
-  1d  5d  1mo  3mo  6mo  ytd  1y  2y  5y
 
 例:
   stocks_cli                      トヨタを直近5営業日分（既定）
@@ -37,9 +34,53 @@ pub struct Args {
 
     /// 取得期間
     #[arg(short, long, default_value = "5d")]
-    pub range: String,
+    pub range: Range,
 
     /// グラフを表示しない
     #[arg(long)]
     pub no_chart: bool,
+}
+
+/// 取得期間。Yahoo が受け付ける値だけを列挙する。
+///
+/// derive(ValueEnum) により、clap が引数のパース時に検証してくれる。
+/// 一覧はヘルプに possible values として自動表示される。
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum Range {
+    // 変種名は数字から始められないため、コマンドラインでの表記は value(name) で指定する
+    #[value(name = "1d")]
+    OneDay,
+    #[value(name = "5d")]
+    FiveDays,
+    #[value(name = "1mo")]
+    OneMonth,
+    #[value(name = "3mo")]
+    ThreeMonths,
+    #[value(name = "6mo")]
+    SixMonths,
+    #[value(name = "ytd")]
+    Ytd,
+    #[value(name = "1y")]
+    OneYear,
+    #[value(name = "2y")]
+    TwoYears,
+    #[value(name = "5y")]
+    FiveYears,
+}
+
+impl Range {
+    /// API に渡す文字列（＝コマンドラインでの表記）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Range::OneDay => "1d",
+            Range::FiveDays => "5d",
+            Range::OneMonth => "1mo",
+            Range::ThreeMonths => "3mo",
+            Range::SixMonths => "6mo",
+            Range::Ytd => "ytd",
+            Range::OneYear => "1y",
+            Range::TwoYears => "2y",
+            Range::FiveYears => "5y",
+        }
+    }
 }
