@@ -1,5 +1,6 @@
 use chrono::{DateTime, FixedOffset, TimeZone};
 use clap::Parser;
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::error::Error;
 // textplots の Chart は JSON 側の Chart と名前がぶつかるので別名を付ける
@@ -98,8 +99,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         .user_agent("stocks-cli/0.1")
         .build()?;
 
-    let response = client.get(&url).send()?.error_for_status()?;
-    let body: ChartResponse = response.json()?;
+    let response = client.get(&url).send()?;
+
+    // 存在しない銘柄コードには Yahoo が 404 を返す。
+    // error_for_status() に任せると HTTP の生エラーがそのまま出てしまうため、
+    // その手前でステータスを見て分かりやすい案内に差し替える。
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(format!(
+            "銘柄コード {} が見つかりませんでした（例: 7203.T, 6758.T, AAPL）",
+            args.symbol
+        )
+        .into());
+    }
+
+    let body: ChartResponse = response.error_for_status()?.json()?;
 
     // result は配列。銘柄が見つからない場合は空になるので、その時はエラーにする
     let result = body
